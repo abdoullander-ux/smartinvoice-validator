@@ -1,0 +1,29 @@
+version: '3.8'
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - API_KEY=${API_KEY}
+    environment:
+      - NEXT_PUBLIC_API_URL=http://backend:3001
+      - EXTRACT_API_KEY=${EXTRACT_API_KEY}
+    ports:
+      - "8080:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    environment:
+      - API_KEY=${API_KEY}
+      - EXTRACT_API_KEY=${EXTRACT_API_KEY}
+      - LLM_ENDPOINT=http://192.168.88.18:11434
+      - LLM_MODEL=gpt-oss:120b-cloud
+    ports:
+      - "3001:3001"
+    restart: unless-stopped

@@ -1,0 +1,5 @@
+{
+  "name": "SmartInvoice Validator",
+  "description": "An AI-powered tool to extract, validate, and complete mandatory data for electronic invoicing compliance.",
+  "requestFramePermissions": []
+}

@@ -1,0 +1,25 @@
+version: '3.8'
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    environment:
+      - API_KEY=${API_KEY}
+    ports:
+      - "3001:3001"
+    restart: unless-stopped
+
+# Usage:
+# 1) Create a .env file with API_KEY=your_secret
+# 2) docker compose -f docker-compose.example.yml up --build

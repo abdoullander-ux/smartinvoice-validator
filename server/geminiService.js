@@ -2,7 +2,7 @@ import Ajv from 'ajv';
 import pdf from 'pdf-parse';
 
 const LLM_ENDPOINT = process.env.LLM_ENDPOINT || 'http://192.168.88.18:11434';
-const LLM_MODEL = process.env.LLM_MODEL || 'gpt-oss:120b-cloud';
+const LLM_MODEL = process.env.LLM_MODEL || 'qwen3-coder:480b-cloud';
 const MAX_RETRIES = 2;
 
 const invoiceSchema = {

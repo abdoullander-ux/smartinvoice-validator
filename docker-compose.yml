@@ -23,7 +23,7 @@ services:
       - API_KEY=${API_KEY}
       - EXTRACT_API_KEY=${EXTRACT_API_KEY}
       - LLM_ENDPOINT=http://192.168.88.18:11434
-      - LLM_MODEL=gpt-oss:120b-cloud
+      - LLM_MODEL=qwen3-coder:480b-cloud
     ports:
       - "3001:3001"
     restart: unless-stopped

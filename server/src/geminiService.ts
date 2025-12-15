@@ -1,9 +1,73 @@
 import Ajv from 'ajv';
 import pdf from 'pdf-parse';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { parse as csvParse } from 'csv-parse/sync';
 
 const LLM_ENDPOINT = process.env.LLM_ENDPOINT || 'http://192.168.88.19:11434';
 const LLM_MODEL = process.env.LLM_MODEL || 'qwen3-coder:480b-cloud';
 const MAX_RETRIES = 2;
+
+// Load mandatory fields from CSVs (defaults to user's provided paths)
+const DEFAULT_MANDATORY_CSV = process.env.MANDATORY_CSV_PATH || '~/Desktop/IA/donneesFE/donneeObligatoire.csv';
+const DEFAULT_SPECIFIC_CSV = process.env.SPECIFIC_CSV_PATH || '~/Desktop/IA/donneesFE/ZoneObliSpecifCasUsage.csv';
+
+function resolveHome(p?: string) {
+  if (!p) return p;
+  if (p.startsWith('~')) return path.join(os.homedir(), p.slice(1));
+  return p;
+}
+
+function loadMandatoryList(csvPath?: string) {
+  try {
+    const p = resolveHome(csvPath || '');
+    if (!p || !fs.existsSync(p)) {
+      console.warn('Mandatory CSV not found:', p);
+      return [];
+    }
+    const raw = fs.readFileSync(p, 'utf8');
+    const records = csvParse(raw, { columns: true, skip_empty_lines: true });
+    if (records.length === 0) return [];
+    const cols = Object.keys(records[0]);
+    const col = cols[0];
+    return records.map(r => String(r[col]).trim()).filter(Boolean);
+  } catch (e) {
+    console.warn('Failed loading mandatory CSV', csvPath, e?.message || e);
+    return [];
+  }
+}
+
+function loadSpecificMap(csvPath?: string) {
+  try {
+    const p = resolveHome(csvPath || '');
+    if (!p || !fs.existsSync(p)) {
+      console.warn('Specific CSV not found:', p);
+      return {} as Record<string, string[]>;
+    }
+    const raw = fs.readFileSync(p, 'utf8');
+    const records = csvParse(raw, { columns: true, skip_empty_lines: true });
+    const map: Record<string, string[]> = {};
+    if (records.length === 0) return map;
+    const cols = Object.keys(records[0]);
+    const useCaseCol = cols.find(c => /usecase|use_case|case/i.test(c)) || cols[0];
+    const fieldCol = cols.find(c => /field|fieldname|zone|obli/i.test(c)) || cols[1] || cols[0];
+    for (const r of records) {
+      const uc = String(r[useCaseCol]).trim();
+      const f = String(r[fieldCol]).trim();
+      if (!uc || !f) continue;
+      map[uc] = map[uc] || [];
+      map[uc].push(f);
+    }
+    return map;
+  } catch (e) {
+    console.warn('Failed loading specific CSV', csvPath, e?.message || e);
+    return {} as Record<string, string[]>;
+  }
+}
+
+const baseMandatoryFields = loadMandatoryList(DEFAULT_MANDATORY_CSV);
+const specificMandatoryMap = loadSpecificMap(DEFAULT_SPECIFIC_CSV);
 
 const invoiceSchema: any = {
   type: 'object',
@@ -108,7 +172,10 @@ async function callLocalLLM(prompt: string) {
 export async function extractInvoiceData(fileBase64: string, mimeType: string): Promise<any> {
   const invoiceText = await extractTextFromInput(fileBase64, mimeType);
 
-  let basePrompt = `You are an assistant that extracts invoicing data from raw invoice text. Return ONLY valid JSON that exactly matches this JSON Schema:\n${JSON.stringify(invoiceSchema)}\n\nHere is the invoice text:\n${invoiceText}\n\nReturn only JSON.`;
+  const requiredFieldsPrompt = baseMandatoryFields.length ? `Mandatory fields: ${baseMandatoryFields.join(', ')}` : '';
+  const specificMapPrompt = Object.keys(specificMandatoryMap).length ? `Specific mandatory fields per useCase: ${JSON.stringify(specificMandatoryMap)}` : '';
+
+  let basePrompt = `You are an assistant that extracts invoicing data from raw invoice text. ${requiredFieldsPrompt} ${specificMapPrompt} Return ONLY valid JSON that matches this JSON Schema:\n${JSON.stringify(invoiceSchema)}\n\nHere is the invoice text:\n${invoiceText}\n\nReturn only JSON.`;
 
   let attemptPrompt = basePrompt;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -137,8 +204,14 @@ export async function extractInvoiceData(fileBase64: string, mimeType: string): 
         }
       }
       if (!parsed.useCase) parsed.useCase = 'STANDARD';
+      const effectiveRequired = Array.from(new Set([...(baseMandatoryFields || []), ...(specificMandatoryMap[parsed.useCase] || [])]));
       const valid = validate(parsed);
-      if (valid) return parsed;
+      const missing = effectiveRequired.filter(f => parsed[f] === undefined || parsed[f] === null || parsed[f] === '');
+      if (valid && missing.length === 0) return parsed;
+      if (missing.length > 0) {
+        attemptPrompt = `The JSON you returned is missing these required fields: ${missing.join(', ')}. Please return ONLY valid JSON that includes them and matches this schema: ${JSON.stringify(invoiceSchema)}\n\nInvoice text:\n${invoiceText}`;
+        continue;
+      }
       const errText = ajv.errorsText(validate.errors);
       attemptPrompt = `The JSON you returned does not match the required schema. Errors: ${errText}. Please return ONLY valid JSON matching this schema: ${JSON.stringify(invoiceSchema)}\n\nInvoice text:\n${invoiceText}`;
     } catch (err) {
